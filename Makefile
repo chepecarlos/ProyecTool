@@ -15,8 +15,12 @@ help:
 	@echo ""
 
 # ─── Instalación ──────────────────────────────────────────────────────────────
+.PHONY: submodulos
+submodulos: ## Inicializa y actualiza los git submodulos (MiLibrerias, etc.)
+	git submodule update --init --recursive
+
 .PHONY: install
-install: ## Instala el paquete y sus dependencias
+install: submodulos ## Instala el paquete y sus dependencias
 	$(UV) sync
 
 .PHONY: install-dev
