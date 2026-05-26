@@ -1,0 +1,20 @@
+[project]
+name = "proyectool"
+version = "0.1.0"
+description = "CLI para sincronizar proyectos locales con Notion"
+readme = "README.md"
+authors = [
+    { name = "chepecarlos", email = "feliciachepe@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+proyectool = "proyectool.main:app"
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"
