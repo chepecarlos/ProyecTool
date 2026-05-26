@@ -1,0 +1,3 @@
+[submodule "src/proyectool/miLibrerias"]
+	path = src/proyectool/miLibrerias
+	url = https://github.com/chepecarlos/MiLibrerias.git
