@@ -5,7 +5,7 @@ from rich import print as rprint
 from rich.panel import Panel
 
 from proyectool import __version__
-from proyectool.commands import local, notion, sync
+from proyectool.commands import area, local, notion, proyecto, sync, tarea
 
 HELP_SETTINGS = {"help_option_names": ["-h", "-help", "--help"]}
 
@@ -18,9 +18,12 @@ app = typer.Typer(
 )
 
 # Registrar sub-comandos
-app.add_typer(local.app,  name="local",  help="📁  Gestiona proyectos locales.")
-app.add_typer(notion.app, name="notion", help="📓  Gestiona proyectos en Notion.")
-app.add_typer(sync.app,   name="sync",   help="🔄  Sincroniza local ↔ Notion.")
+app.add_typer(proyecto.app, name="proyecto", help="🗂️   Gestiona Proyectos.")
+app.add_typer(tarea.app,    name="tarea",    help="✅  Gestiona Tareas.")
+app.add_typer(area.app,     name="area",     help="🏷️   Gestiona Áreas.")
+app.add_typer(notion.app,   name="notion",   help="📓  Configuración de Notion.")
+app.add_typer(sync.app,     name="sync",     help="🔄  Sincroniza local ↔ Notion.")
+app.add_typer(local.app,    name="local",    help="📁  Gestiona proyectos locales.")
 
 
 def _version_callback(value: bool) -> None:
