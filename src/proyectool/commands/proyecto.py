@@ -1,5 +1,6 @@
 """Comandos para gestionar Proyectos."""
 
+import re
 from pathlib import Path
 
 import typer
@@ -11,6 +12,7 @@ from rich.text import Text
 from proyectool.miLibrerias.FuncionesArchivos import EscribirArchivo, ObtenerArchivo
 from proyectool.notion_api import (
     archivar_pagina,
+    crear_proyecto,
     extraer_id_url,
     obtener_datos_proyecto,
     obtener_db_configurada,
@@ -37,6 +39,27 @@ def _ruta_area() -> Path:
     return Path.cwd() / AREA_FILE
 
 
+def _limpiar_nombre_folder(nombre: str) -> str:
+    """Convierte el nombre de un folder en un título legible.
+
+    Ejemplos:
+        '1.Proyecto_ejemplo'  → 'Proyecto ejemplo'
+        '1.ProyectoEjemplo'   → 'Proyecto Ejemplo'
+        '01_MiProyecto'       → 'Mi Proyecto'
+        'mi-proyecto-demo'    → 'Mi proyecto demo'
+    """
+    # Quitar prefijo numérico: "1.", "01.", "1_", "01-", etc.
+    nombre = re.sub(r'^\d+[._\-\s]+', '', nombre)
+    # Separar camelCase: "ProyectoEjemplo" → "Proyecto Ejemplo"
+    nombre = re.sub(r'([a-z])([A-Z])', r'\1 \2', nombre)
+    # Reemplazar separadores (._-) con espacios
+    nombre = re.sub(r'[._\-]+', ' ', nombre)
+    # Limpiar espacios múltiples
+    nombre = re.sub(r'\s+', ' ', nombre).strip()
+    # Capitalizar primera letra
+    return nombre[0].upper() + nombre[1:] if nombre else nombre
+
+
 @app.command("list")
 def list_proyectos() -> None:
     """📋  Muestra el proyecto del folder actual."""
@@ -57,12 +80,16 @@ def list_proyectos() -> None:
 
 @app.command("add")
 def add_proyecto(
-    url: str = typer.Argument(..., help="URL del proyecto en Notion."),
+    url: str = typer.Argument(None, help="URL del proyecto en Notion. Si se omite, se crea uno nuevo."),
 ) -> None:
-    """➕  Configura el proyecto de este folder."""
+    """➕  Vincula o crea el proyecto de este folder en Notion.
+
+    Sin URL: busca un área en el folder padre y crea el proyecto automáticamente.
+    Con URL: vincula el folder a un proyecto existente en Notion.
+    """
     archivo = _ruta_proyecto()
 
-    # Validar que no exista un área ya configurada
+    # Validar que no exista un área ya configurada en este folder
     if _ruta_area().exists():
         data_area = ObtenerArchivo(str(_ruta_area()), EnConfig=False)
         nombre = data_area.get("titulo") or data_area.get("url", "—")
@@ -77,7 +104,54 @@ def add_proyecto(
         rprint("  Usa [cyan]proyectool proyecto remove[/] primero para reemplazarlo.")
         raise typer.Exit()
 
-    # Extraer ID de Notion desde la URL
+    # ── Modo creación: sin URL ────────────────────────────────────────────────
+    if url is None:
+        nombre_folder = _limpiar_nombre_folder(Path.cwd().name)
+
+        # Buscar área en el folder padre
+        ruta_area_padre = Path.cwd().parent / ".proyectool" / "area.md"
+        if not ruta_area_padre.exists():
+            rprint("[red]✗[/]  No se pasó URL y el folder padre no tiene un área configurada.")
+            rprint("  Opciones:")
+            rprint("    • Pasa una URL:   [cyan]proyectool proyecto add <url>[/]")
+            rprint("    • Configura área en el folder padre y luego vuelve a intentarlo.")
+            raise typer.Exit(1)
+
+        data_area = ObtenerArchivo(str(ruta_area_padre), EnConfig=False)
+        area_id   = data_area.get("id")
+        area_nombre = data_area.get("titulo") or area_id
+
+        if not area_id:
+            rprint("[red]✗[/]  El área del folder padre no tiene ID de Notion.")
+            raise typer.Exit(1)
+
+        db_proyectos = obtener_db_configurada("db_proyectos")
+        if not db_proyectos:
+            rprint("[red]✗[/]  No hay base de datos de proyectos configurada.")
+            rprint("  Configúrala con: [cyan]proyectool notion config --db-proyectos <id>[/]")
+            raise typer.Exit(1)
+
+        rprint(f"[dim]Creando proyecto [bold]{nombre_folder}[/] en Notion bajo el área [bold]{area_nombre}[/]...[/]")
+
+        with console.status("[dim]Creando en Notion...[/]"):
+            page_data = crear_proyecto(nombre_folder, area_id=area_id)
+
+        if not page_data:
+            rprint("[red]✗[/]  No se pudo crear el proyecto en Notion.")
+            rprint("  Verifica el token con [cyan]proyectool notion config[/]")
+            raise typer.Exit(1)
+
+        page_id = page_data.get("id")
+        titulo  = obtener_titulo(page_data) or nombre_folder
+        url_notion = page_data.get("url", "")
+
+        EscribirArchivo(str(archivo), {"url": url_notion, "id": page_id, "titulo": titulo})
+        rprint(f"[green]✓[/] Proyecto [bold]{titulo}[/] creado en Notion.")
+        rprint(f"  Área: [cyan]{area_nombre}[/]")
+        rprint(f"  URL:  [dim]{url_notion}[/]")
+        return
+
+    # ── Modo vinculación: con URL ─────────────────────────────────────────────
     page_id = extraer_id_url(url)
     if not page_id:
         rprint("[red]✗[/]  No se pudo extraer el ID de la URL.")

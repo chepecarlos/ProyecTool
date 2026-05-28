@@ -162,6 +162,60 @@ def obtener_datos_proyecto(page_data: dict) -> dict:
     }
 
 
+def crear_proyecto(nombre: str, area_id: str | None = None) -> dict | None:
+    """Crea un nuevo proyecto en la base de datos de Proyectos en Notion.
+
+    Args:
+        nombre: Nombre del proyecto (título de la página).
+        area_id: ID del área padre a vincular (opcional).
+
+    Returns:
+        dict con la respuesta de Notion (incluye 'id' y 'url'), o None si falló.
+    """
+    token = _obtener_token()
+    db_proyectos = obtener_db_configurada("db_proyectos")
+
+    if not token:
+        logger.warning("No hay token de Notion configurado")
+        return None
+    if not db_proyectos:
+        logger.warning("No hay db_proyectos configurado")
+        return None
+
+    url_consulta = "https://api.notion.com/v1/pages"
+    cabeceras = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+
+    propiedades: dict = {
+        "Nombre": {"title": [{"text": {"content": nombre}}]},
+    }
+    if area_id:
+        propiedades["Área"] = {"relation": [{"id": area_id}]}
+
+    payload = {
+        "parent": {"database_id": db_proyectos},
+        "properties": propiedades,
+    }
+
+    try:
+        respuesta = requests.post(url_consulta, headers=cabeceras, json=payload, timeout=10)
+    except requests.exceptions.Timeout:
+        logger.warning("La consulta a Notion tardó demasiado")
+        return None
+    except Exception as e:
+        logger.warning(f"Error al crear proyecto en Notion: {e}")
+        return None
+
+    if respuesta.status_code == 200:
+        return respuesta.json()
+
+    logger.warning(f"Notion respondió con código {respuesta.status_code}: {respuesta.text}")
+    return None
+
+
 def actualizar_propiedades(page_id: str, propiedades: dict) -> bool:
     """Actualiza propiedades de una página en Notion via PATCH.
 
