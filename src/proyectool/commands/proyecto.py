@@ -9,7 +9,15 @@ from rich.table import Table
 from rich.text import Text
 
 from proyectool.miLibrerias.FuncionesArchivos import EscribirArchivo, ObtenerArchivo
-from proyectool.notion_api import extraer_id_url, obtener_datos_proyecto, obtener_pagina, obtener_titulo
+from proyectool.notion_api import (
+    archivar_pagina,
+    extraer_id_url,
+    obtener_datos_proyecto,
+    obtener_db_configurada,
+    obtener_db_padre,
+    obtener_pagina,
+    obtener_titulo,
+)
 
 HELP_SETTINGS = {"help_option_names": ["-h", "-help", "--help"]}
 
@@ -37,7 +45,7 @@ def list_proyectos() -> None:
 
     if not data:
         rprint("[yellow]⚠[/]  No hay proyecto configurado en este folder.")
-        rprint(f"  Usa: [cyan]proyectool proyecto add <url>[/]")
+        rprint("  Usa: [cyan]proyectool proyecto add <url>[/]")
         return
 
     if data.get("titulo"):
@@ -59,30 +67,44 @@ def add_proyecto(
         data_area = ObtenerArchivo(str(_ruta_area()), EnConfig=False)
         nombre = data_area.get("titulo") or data_area.get("url", "—")
         rprint(f"[red]✗[/]  Este folder ya está configurado como [bold]área[/]: [dim]{nombre}[/]")
-        rprint(f"  Un folder no puede ser área y proyecto a la vez.")
-        rprint(f"  Usa [cyan]proyectool area remove[/] primero.")
+        rprint("  Un folder no puede ser área y proyecto a la vez.")
+        rprint("  Usa [cyan]proyectool area remove[/] primero.")
         raise typer.Exit(1)
 
     if archivo.exists():
         data = ObtenerArchivo(str(archivo), EnConfig=False)
         rprint(f"[yellow]⚠[/]  Ya hay un proyecto configurado: [dim]{data.get('url')}[/]")
-        rprint(f"  Usa [cyan]proyectool proyecto remove[/] primero para reemplazarlo.")
+        rprint("  Usa [cyan]proyectool proyecto remove[/] primero para reemplazarlo.")
         raise typer.Exit()
 
     # Extraer ID de Notion desde la URL
     page_id = extraer_id_url(url)
-    titulo = None
+    if not page_id:
+        rprint("[red]✗[/]  No se pudo extraer el ID de la URL.")
+        rprint("  Asegúrate de usar una URL de Notion válida.")
+        raise typer.Exit(1)
 
-    if page_id:
-        with console.status("[dim]Consultando Notion...[/]"):
-            page_data = obtener_pagina(page_id)
-            if page_data:
-                titulo = obtener_titulo(page_data)
+    with console.status("[dim]Consultando Notion...[/]"):
+        page_data = obtener_pagina(page_id)
 
-    # Armar datos a guardar
-    data = {"url": url}
-    if page_id:
-        data["id"] = page_id
+    if not page_data:
+        rprint("[red]✗[/]  No se pudo obtener la página desde Notion.")
+        rprint("  Verifica el token con [cyan]proyectool notion config[/]")
+        raise typer.Exit(1)
+
+    # Validar que la página pertenezca a la base de datos de proyectos
+    db_proyectos = obtener_db_configurada("db_proyectos")
+    if db_proyectos:
+        db_padre = obtener_db_padre(page_data)
+        if db_padre and db_padre != db_proyectos:
+            titulo_erronea = obtener_titulo(page_data) or page_id
+            rprint(f"[red]✗[/]  La página [bold]{titulo_erronea}[/] no pertenece a la base de datos de Proyectos.")
+            rprint("  Asegúrate de pasar la URL de una página del database de Proyectos.")
+            raise typer.Exit(1)
+
+    titulo = obtener_titulo(page_data)
+
+    data = {"url": url, "id": page_id}
     if titulo:
         data["titulo"] = titulo
 
@@ -92,10 +114,6 @@ def add_proyecto(
         rprint(f"[green]✓[/] Proyecto [bold]{titulo}[/] guardado en [dim]{archivo}[/]")
     else:
         rprint(f"[green]✓[/] Proyecto guardado en [dim]{archivo}[/]")
-        if not page_id:
-            rprint(f"  [yellow]⚠[/] No se pudo extraer el ID de la URL.")
-        else:
-            rprint(f"  [yellow]⚠[/] No se pudo obtener el título (verifica el token con [cyan]proyectool notion config[/]).")
 
 
 @app.command("info")
@@ -106,7 +124,7 @@ def info_proyecto() -> None:
 
     if not data:
         rprint("[yellow]⚠[/]  No hay proyecto configurado en este folder.")
-        rprint(f"  Usa: [cyan]proyectool proyecto add <url>[/]")
+        rprint("  Usa: [cyan]proyectool proyecto add <url>[/]")
         raise typer.Exit()
 
     page_id = data.get("id")
@@ -119,12 +137,11 @@ def info_proyecto() -> None:
 
     if not page_data:
         rprint("[red]✗[/]  No se pudo obtener el proyecto desde Notion.")
-        rprint(f"  Verifica el token con [cyan]proyectool notion config[/]")
+        rprint("  Verifica el token con [cyan]proyectool notion config[/]")
         raise typer.Exit(1)
 
     info = obtener_datos_proyecto(page_data)
 
-    # Colores por estado
     ESTADO_COLOR = {
         "idea": "dim",
         "desarrollo": "blue",
@@ -142,19 +159,53 @@ def info_proyecto() -> None:
     color_estado = ESTADO_COLOR.get(estado, "white")
 
     table = Table(title=f"📁  {info['titulo']}", highlight=True, show_header=False)
-    table.add_column("Campo",  style="cyan", no_wrap=True)
+    table.add_column("Campo", style="cyan", no_wrap=True)
     table.add_column("Valor")
 
-    table.add_row("Estado",    Text(estado, style=f"bold {color_estado}"))
-    table.add_row("Canal",     info["canal"]    or "[dim]—[/]")
-    table.add_row("Asignado",  info["asignado"] or "[dim]—[/]")
-    table.add_row("Blender",   info["blender"]  or "[dim]—[/]")
-    table.add_row("Tareas",    info["cantidad_tareas"] or f"{len(info['tareas_ids'])} tareas")
+    table.add_row("Estado",       Text(estado, style=f"bold {color_estado}"))
+    table.add_row("Canal",        info["canal"]    or "[dim]—[/]")
+    table.add_row("Asignado",     info["asignado"] or "[dim]—[/]")
+    table.add_row("Blender",      info["blender"]  or "[dim]—[/]")
+    table.add_row("Tareas",       info["cantidad_tareas"] or f"{len(info['tareas_ids'])} tareas")
     table.add_row("Fecha límite", info["hacer_para"] or "[dim]—[/]")
-    table.add_row("Terminado", "✅ sí" if info["terminado"] else "⬜ no")
-    table.add_row("URL",       f"[dim]{info['url']}[/]")
+    table.add_row("Terminado",    "✅ sí" if info["terminado"] else "⬜ no")
+    table.add_row("URL",          f"[dim]{info['url']}[/]")
 
     rprint(table)
+
+
+@app.command("archivar")
+def archivar_proyecto(
+    deshacer: bool = typer.Option(False, "--deshacer", "-d", help="Desarchiva el proyecto en lugar de archivarlo."),
+) -> None:
+    """📦  Archiva (o desarchiva) el proyecto en Notion."""
+    archivo = _ruta_proyecto()
+    data = ObtenerArchivo(str(archivo), EnConfig=False)
+
+    if not data:
+        rprint("[yellow]⚠[/]  No hay proyecto configurado en este folder.")
+        rprint("  Usa: [cyan]proyectool proyecto add <url>[/]")
+        raise typer.Exit()
+
+    page_id = data.get("id")
+    if not page_id:
+        rprint("[red]✗[/]  El proyecto no tiene ID de Notion guardado.")
+        raise typer.Exit(1)
+
+    accion = "Desarchivando" if deshacer else "Archivando"
+    titulo = data.get("titulo") or page_id
+
+    with console.status(f"[dim]{accion} en Notion...[/]"):
+        ok = archivar_pagina(page_id, archivar=not deshacer)
+
+    if ok:
+        icono = "📤" if deshacer else "📦"
+        verbo = "desarchivado" if deshacer else "archivado"
+        rprint(f"[green]✓[/] {icono} Proyecto [bold]{titulo}[/] {verbo} en Notion.")
+    else:
+        rprint("[red]✗[/]  No se pudo actualizar el proyecto en Notion.")
+        rprint("  Verifica el token con [cyan]proyectool notion config[/]")
+        raise typer.Exit(1)
 
 
 @app.command("remove")

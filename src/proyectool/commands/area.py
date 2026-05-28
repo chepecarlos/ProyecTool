@@ -6,9 +6,18 @@ import typer
 from rich import print as rprint
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from proyectool.miLibrerias.FuncionesArchivos import EscribirArchivo, ObtenerArchivo
-from proyectool.notion_api import extraer_id_url, obtener_datos_area, obtener_pagina, obtener_titulo
+from proyectool.notion_api import (
+    archivar_pagina,
+    extraer_id_url,
+    obtener_datos_area,
+    obtener_db_configurada,
+    obtener_db_padre,
+    obtener_pagina,
+    obtener_titulo,
+)
 
 console = Console()
 
@@ -16,7 +25,6 @@ HELP_SETTINGS = {"help_option_names": ["-h", "-help", "--help"]}
 
 app = typer.Typer(no_args_is_help=True, context_settings=HELP_SETTINGS)
 
-# Un solo archivo de área por folder
 AREA_FILE     = Path(".proyectool") / "area.md"
 PROYECTO_FILE = Path(".proyectool") / "proyecto.md"
 
@@ -37,7 +45,7 @@ def list_areas() -> None:
 
     if not data:
         rprint("[yellow]⚠[/]  No hay área configurada en este folder.")
-        rprint(f"  Usa: [cyan]proyectool area add <url>[/]")
+        rprint("  Usa: [cyan]proyectool area add <url>[/]")
         return
 
     if data.get("titulo"):
@@ -55,7 +63,7 @@ def info_area() -> None:
 
     if not data:
         rprint("[yellow]⚠[/]  No hay área configurada en este folder.")
-        rprint(f"  Usa: [cyan]proyectool area add <url>[/]")
+        rprint("  Usa: [cyan]proyectool area add <url>[/]")
         raise typer.Exit()
 
     page_id = data.get("id")
@@ -68,12 +76,11 @@ def info_area() -> None:
 
     if not page_data:
         rprint("[red]✗[/]  No se pudo obtener el área desde Notion.")
-        rprint(f"  Verifica el token con [cyan]proyectool notion config[/]")
+        rprint("  Verifica el token con [cyan]proyectool notion config[/]")
         raise typer.Exit(1)
 
     info = obtener_datos_area(page_data)
 
-    # Color según tipo
     TIPO_COLOR = {"Area": "blue", "Recurso": "magenta"}
     tipo = info["tipo"] or "—"
     color_tipo = TIPO_COLOR.get(tipo, "white")
@@ -82,7 +89,6 @@ def info_area() -> None:
     table.add_column("Campo", style="cyan", no_wrap=True)
     table.add_column("Valor")
 
-    from rich.text import Text
     table.add_row("Tipo",      Text(tipo, style=f"bold {color_tipo}"))
     table.add_row("Proyectos", str(len(info["proyectos_ids"])) if info["proyectos_ids"] else "[dim]0[/]")
     table.add_row("Notas",     str(len(info["notas_ids"]))     if info["notas_ids"]     else "[dim]0[/]")
@@ -105,30 +111,44 @@ def add_area(
         data_proyecto = ObtenerArchivo(str(_ruta_proyecto()), EnConfig=False)
         nombre = data_proyecto.get("titulo") or data_proyecto.get("url", "—")
         rprint(f"[red]✗[/]  Este folder ya está configurado como [bold]proyecto[/]: [dim]{nombre}[/]")
-        rprint(f"  Un folder no puede ser proyecto y área a la vez.")
-        rprint(f"  Usa [cyan]proyectool proyecto remove[/] primero.")
+        rprint("  Un folder no puede ser proyecto y área a la vez.")
+        rprint("  Usa [cyan]proyectool proyecto remove[/] primero.")
         raise typer.Exit(1)
 
     if archivo.exists():
         data = ObtenerArchivo(str(archivo), EnConfig=False)
         rprint(f"[yellow]⚠[/]  Ya hay un área configurada: [dim]{data.get('url')}[/]")
-        rprint(f"  Usa [cyan]proyectool area remove[/] primero para reemplazarla.")
+        rprint("  Usa [cyan]proyectool area remove[/] primero para reemplazarla.")
         raise typer.Exit()
 
     # Extraer ID de Notion desde la URL
     page_id = extraer_id_url(url)
-    titulo = None
+    if not page_id:
+        rprint("[red]✗[/]  No se pudo extraer el ID de la URL.")
+        rprint("  Asegúrate de usar una URL de Notion válida.")
+        raise typer.Exit(1)
 
-    if page_id:
-        with console.status("[dim]Consultando Notion...[/]"):
-            page_data = obtener_pagina(page_id)
-            if page_data:
-                titulo = obtener_titulo(page_data)
+    with console.status("[dim]Consultando Notion...[/]"):
+        page_data = obtener_pagina(page_id)
 
-    # Armar datos a guardar
-    data = {"url": url}
-    if page_id:
-        data["id"] = page_id
+    if not page_data:
+        rprint("[red]✗[/]  No se pudo obtener la página desde Notion.")
+        rprint("  Verifica el token con [cyan]proyectool notion config[/]")
+        raise typer.Exit(1)
+
+    # Validar que la página pertenezca a la base de datos de áreas
+    db_area = obtener_db_configurada("db_area")
+    if db_area:
+        db_padre = obtener_db_padre(page_data)
+        if db_padre and db_padre != db_area:
+            titulo_erronea = obtener_titulo(page_data) or page_id
+            rprint(f"[red]✗[/]  La página [bold]{titulo_erronea}[/] no pertenece a la base de datos de Áreas.")
+            rprint("  Asegúrate de pasar la URL de una página del database de Áreas/Recursos.")
+            raise typer.Exit(1)
+
+    titulo = obtener_titulo(page_data)
+
+    data = {"url": url, "id": page_id}
     if titulo:
         data["titulo"] = titulo
 
@@ -138,10 +158,40 @@ def add_area(
         rprint(f"[green]✓[/] Área [bold]{titulo}[/] guardada en [dim]{archivo}[/]")
     else:
         rprint(f"[green]✓[/] Área guardada en [dim]{archivo}[/]")
-        if not page_id:
-            rprint(f"  [yellow]⚠[/] No se pudo extraer el ID de la URL.")
-        else:
-            rprint(f"  [yellow]⚠[/] No se pudo obtener el título (verifica el token con [cyan]proyectool notion config[/]).")
+
+
+@app.command("archivar")
+def archivar_area(
+    deshacer: bool = typer.Option(False, "--deshacer", "-d", help="Desarchiva el área en lugar de archivarla."),
+) -> None:
+    """📦  Archiva (o desarchiva) el área en Notion."""
+    archivo = _ruta_area()
+    data = ObtenerArchivo(str(archivo), EnConfig=False)
+
+    if not data:
+        rprint("[yellow]⚠[/]  No hay área configurada en este folder.")
+        rprint("  Usa: [cyan]proyectool area add <url>[/]")
+        raise typer.Exit()
+
+    page_id = data.get("id")
+    if not page_id:
+        rprint("[red]✗[/]  El área no tiene ID de Notion guardado.")
+        raise typer.Exit(1)
+
+    accion = "Desarchivando" if deshacer else "Archivando"
+    titulo = data.get("titulo") or page_id
+
+    with console.status(f"[dim]{accion} en Notion...[/]"):
+        ok = archivar_pagina(page_id, archivar=not deshacer)
+
+    if ok:
+        icono = "📤" if deshacer else "📦"
+        verbo = "desarchivada" if deshacer else "archivada"
+        rprint(f"[green]✓[/] {icono} Área [bold]{titulo}[/] {verbo} en Notion.")
+    else:
+        rprint("[red]✗[/]  No se pudo actualizar el área en Notion.")
+        rprint("  Verifica el token con [cyan]proyectool notion config[/]")
+        raise typer.Exit(1)
 
 
 @app.command("remove")

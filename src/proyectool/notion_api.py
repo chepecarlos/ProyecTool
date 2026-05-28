@@ -16,11 +16,39 @@ CONFIG_FILE = Path.home() / ".config" / "proyectool" / "notion.md"
 NOTION_VERSION = "2022-06-28"
 
 
+def _normalizar_id(id_str: str) -> str:
+    """Quita guiones de un UUID para comparaciones."""
+    return id_str.replace("-", "").lower() if id_str else ""
+
+
+def _obtener_config() -> dict:
+    """Lee la configuración completa de Notion."""
+    return ObtenerArchivo(str(CONFIG_FILE), EnConfig=False) or {}
+
+
 def _obtener_token() -> str | None:
     """Obtiene el token de Notion desde la configuración."""
-    data = ObtenerArchivo(str(CONFIG_FILE), EnConfig=False)
-    if data:
-        return data.get("token")
+    return _obtener_config().get("token")
+
+
+def obtener_db_configurada(campo: str) -> str | None:
+    """Devuelve el ID de una base de datos configurada (db_area, db_proyectos).
+
+    Args:
+        campo: nombre del campo en la config, ej. 'db_area' o 'db_proyectos'
+
+    Returns:
+        ID normalizado (sin guiones) o None si no está configurado.
+    """
+    valor = _obtener_config().get(campo)
+    return _normalizar_id(valor) if valor else None
+
+
+def obtener_db_padre(page_data: dict) -> str | None:
+    """Extrae el database_id del parent de una página (normalizado, sin guiones)."""
+    parent = page_data.get("parent", {})
+    if parent.get("type") == "database_id":
+        return _normalizar_id(parent.get("database_id", ""))
     return None
 
 
@@ -132,6 +160,62 @@ def obtener_datos_proyecto(page_data: dict) -> dict:
         "area_ids":       relacion("Área"),
         "url":            page_data.get("url"),
     }
+
+
+def actualizar_propiedades(page_id: str, propiedades: dict) -> bool:
+    """Actualiza propiedades de una página en Notion via PATCH.
+
+    Args:
+        page_id: ID de la página a actualizar.
+        propiedades: dict con las propiedades en formato de la API de Notion.
+
+    Returns:
+        True si se actualizó correctamente, False en caso de error.
+    """
+    token = _obtener_token()
+    if not token:
+        logger.warning("No hay token de Notion configurado")
+        return False
+
+    url_consulta = f"https://api.notion.com/v1/pages/{page_id}"
+    cabeceras = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+
+    try:
+        respuesta = requests.patch(
+            url_consulta,
+            headers=cabeceras,
+            json={"properties": propiedades},
+            timeout=10,
+        )
+    except requests.exceptions.Timeout:
+        logger.warning("La consulta a Notion tardó demasiado")
+        return False
+    except Exception as e:
+        logger.warning(f"Error al actualizar Notion: {e}")
+        return False
+
+    if respuesta.status_code == 200:
+        return True
+
+    logger.warning(f"Notion respondió con código {respuesta.status_code}")
+    return False
+
+
+def archivar_pagina(page_id: str, archivar: bool = True) -> bool:
+    """Activa o desactiva el checkbox Archivo de una página.
+
+    Args:
+        page_id: ID de la página.
+        archivar: True para archivar, False para desarchivar.
+
+    Returns:
+        True si se actualizó correctamente.
+    """
+    return actualizar_propiedades(page_id, {"Archivo": {"checkbox": archivar}})
 
 
 def obtener_datos_area(page_data: dict) -> dict:
