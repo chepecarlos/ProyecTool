@@ -43,21 +43,25 @@ def _limpiar_nombre_folder(nombre: str) -> str:
     """Convierte el nombre de un folder en un título legible.
 
     Ejemplos:
-        '1.Proyecto_ejemplo'  → 'Proyecto ejemplo'
-        '1.ProyectoEjemplo'   → 'Proyecto Ejemplo'
-        '01_MiProyecto'       → 'Mi Proyecto'
+        '1.Proyecto_ejemplo'  → '1 Proyecto ejemplo'
+        '1.ProyectoEjemplo'   → '1 Proyecto ejemplo'
+        '01_MiProyecto'       → '01 Mi proyecto'
         'mi-proyecto-demo'    → 'Mi proyecto demo'
     """
-    # Quitar prefijo numérico: "1.", "01.", "1_", "01-", etc.
-    nombre = re.sub(r'^\d+[._\-\s]+', '', nombre)
+    # Extraer prefijo numérico si existe: "1.", "01.", "1_", "01-", etc.
+    match = re.match(r'^(\d+)[._\-\s]+', nombre)
+    prefijo = match.group(1) + ' ' if match else ''
+    if match:
+        nombre = nombre[match.end():]
     # Separar camelCase: "ProyectoEjemplo" → "Proyecto Ejemplo"
     nombre = re.sub(r'([a-z])([A-Z])', r'\1 \2', nombre)
     # Reemplazar separadores (._-) con espacios
     nombre = re.sub(r'[._\-]+', ' ', nombre)
-    # Limpiar espacios múltiples
-    nombre = re.sub(r'\s+', ' ', nombre).strip()
-    # Capitalizar primera letra
-    return nombre[0].upper() + nombre[1:] if nombre else nombre
+    # Limpiar espacios múltiples y pasar a minúsculas
+    nombre = re.sub(r'\s+', ' ', nombre).strip().lower()
+    # Capitalizar solo la primera letra del nombre
+    nombre = nombre[0].upper() + nombre[1:] if nombre else nombre
+    return (prefijo + nombre).strip()
 
 
 @app.command("list")
