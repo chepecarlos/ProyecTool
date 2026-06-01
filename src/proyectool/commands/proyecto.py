@@ -108,13 +108,21 @@ def add_proyecto(
     if url is None:
         nombre_folder = _limpiar_nombre_folder(Path.cwd().name)
 
-        # Buscar área en el folder padre
-        ruta_area_padre = Path.cwd().parent / ".proyectool" / "area.md"
-        if not ruta_area_padre.exists():
-            rprint("[red]✗[/]  No se pasó URL y el folder padre no tiene un área configurada.")
+        # Buscar área hasta 3 niveles arriba (padre, abuelo, bisabuelo)
+        ruta_area_padre = None
+        directorio = Path.cwd()
+        for _ in range(3):
+            directorio = directorio.parent
+            candidato = directorio / ".proyectool" / "area.md"
+            if candidato.exists():
+                ruta_area_padre = candidato
+                break
+
+        if ruta_area_padre is None:
+            rprint("[red]✗[/]  No se pasó URL y no se encontró un área en los 3 niveles superiores.")
             rprint("  Opciones:")
             rprint("    • Pasa una URL:   [cyan]proyectool proyecto add <url>[/]")
-            rprint("    • Configura área en el folder padre y luego vuelve a intentarlo.")
+            rprint("    • Configura área en un folder ancestro y luego vuelve a intentarlo.")
             raise typer.Exit(1)
 
         data_area = ObtenerArchivo(str(ruta_area_padre), EnConfig=False)
