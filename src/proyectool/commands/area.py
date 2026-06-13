@@ -1,5 +1,6 @@
 """Comandos para gestionar Áreas."""
 
+import webbrowser
 from pathlib import Path
 
 import typer
@@ -192,6 +193,27 @@ def archivar_area(
         rprint("[red]✗[/]  No se pudo actualizar el área en Notion.")
         rprint("  Verifica el token con [cyan]proyectool notion config[/]")
         raise typer.Exit(1)
+
+
+@app.command("open")
+def open_area() -> None:
+    """🌐  Abre el área en el navegador."""
+    archivo = _ruta_area()
+    data = ObtenerArchivo(str(archivo), EnConfig=False)
+
+    if not data:
+        rprint("[yellow]⚠[/]  No hay área configurada en este folder.")
+        rprint("  Usa: [cyan]proyectool area add <url>[/]")
+        raise typer.Exit()
+
+    url = data.get("url")
+    if not url:
+        rprint("[red]✗[/]  El área no tiene URL guardada.")
+        raise typer.Exit(1)
+
+    titulo = data.get("titulo") or url
+    webbrowser.open(url)
+    rprint(f"[green]✓[/] Abriendo [bold]{titulo}[/] en el navegador.")
 
 
 @app.command("remove")

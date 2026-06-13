@@ -1,6 +1,7 @@
 """Comandos para gestionar Proyectos."""
 
 import re
+import webbrowser
 from pathlib import Path
 
 import typer
@@ -28,7 +29,7 @@ app = typer.Typer(no_args_is_help=True, context_settings=HELP_SETTINGS)
 console = Console()
 
 PROYECTO_FILE = Path(".proyectool") / "proyecto.md"
-AREA_FILE     = Path(".proyectool") / "area.md"
+AREA_FILE = Path(".proyectool") / "area.md"
 
 
 def _ruta_proyecto() -> Path:
@@ -130,7 +131,7 @@ def add_proyecto(
             raise typer.Exit(1)
 
         data_area = ObtenerArchivo(str(ruta_area_padre), EnConfig=False)
-        area_id   = data_area.get("id")
+        area_id = data_area.get("id")
         area_nombre = data_area.get("titulo") or area_id
 
         if not area_id:
@@ -154,7 +155,7 @@ def add_proyecto(
             raise typer.Exit(1)
 
         page_id = page_data.get("id")
-        titulo  = obtener_titulo(page_data) or nombre_folder
+        titulo = obtener_titulo(page_data) or nombre_folder
         url_notion = page_data.get("url", "")
 
         EscribirArchivo(str(archivo), {"url": url_notion, "id": page_id, "titulo": titulo})
@@ -248,10 +249,10 @@ def info_proyecto() -> None:
     table.add_column("Campo", style="cyan", no_wrap=True)
     table.add_column("Valor")
 
-    table.add_row("Estado",       Text(estado, style=f"bold {color_estado}"))
-    table.add_row("Canal",        info["canal"]    or "[dim]—[/]")
-    table.add_row("Asignado",     info["asignado"] or "[dim]—[/]")
-    table.add_row("Blender",      info["blender"]  or "[dim]—[/]")
+    table.add_row("Estado", Text(estado, style=f"bold {color_estado}"))
+    table.add_row("Canal", info["canal"] or "[dim]—[/]")
+    table.add_row("Asignado", info["asignado"] or "[dim]—[/]")
+    table.add_row("Blender", info["blender"] or "[dim]—[/]")
     table.add_row("Tareas",       info["cantidad_tareas"] or f"{len(info['tareas_ids'])} tareas")
     table.add_row("Fecha límite", info["hacer_para"] or "[dim]—[/]")
     table.add_row("Terminado",    "✅ sí" if info["terminado"] else "⬜ no")
@@ -292,6 +293,27 @@ def archivar_proyecto(
         rprint("[red]✗[/]  No se pudo actualizar el proyecto en Notion.")
         rprint("  Verifica el token con [cyan]proyectool notion config[/]")
         raise typer.Exit(1)
+
+
+@app.command("open")
+def open_proyecto() -> None:
+    """🌐  Abre el proyecto en el navegador."""
+    archivo = _ruta_proyecto()
+    data = ObtenerArchivo(str(archivo), EnConfig=False)
+
+    if not data:
+        rprint("[yellow]⚠[/]  No hay proyecto configurado en este folder.")
+        rprint("  Usa: [cyan]proyectool proyecto add <url>[/]")
+        raise typer.Exit()
+
+    url = data.get("url")
+    if not url:
+        rprint("[red]✗[/]  El proyecto no tiene URL guardada.")
+        raise typer.Exit(1)
+
+    titulo = data.get("titulo") or url
+    webbrowser.open(url)
+    rprint(f"[green]✓[/] Abriendo [bold]{titulo}[/] en el navegador.")
 
 
 @app.command("remove")
