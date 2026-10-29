@@ -162,6 +162,45 @@ def obtener_datos_proyecto(page_data: dict) -> dict:
     }
 
 
+def _crear_pagina(db_id: str, propiedades: dict) -> dict | None:
+    """Crea una página en una base de datos de Notion.
+
+    Returns:
+        dict con la respuesta de Notion (incluye 'id' y 'url'), o None si falló.
+    """
+    token = _obtener_token()
+    if not token:
+        logger.warning("No hay token de Notion configurado")
+        return None
+
+    url_consulta = "https://api.notion.com/v1/pages"
+    cabeceras = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+
+    payload = {
+        "parent": {"database_id": db_id},
+        "properties": propiedades,
+    }
+
+    try:
+        respuesta = requests.post(url_consulta, headers=cabeceras, json=payload, timeout=10)
+    except requests.exceptions.Timeout:
+        logger.warning("La consulta a Notion tardó demasiado")
+        return None
+    except Exception as e:
+        logger.warning(f"Error al crear página en Notion: {e}")
+        return None
+
+    if respuesta.status_code == 200:
+        return respuesta.json()
+
+    logger.warning(f"Notion respondió con código {respuesta.status_code}: {respuesta.text}")
+    return None
+
+
 def crear_proyecto(nombre: str, area_id: str | None = None) -> dict | None:
     """Crea un nuevo proyecto en la base de datos de Proyectos en Notion.
 
@@ -172,22 +211,10 @@ def crear_proyecto(nombre: str, area_id: str | None = None) -> dict | None:
     Returns:
         dict con la respuesta de Notion (incluye 'id' y 'url'), o None si falló.
     """
-    token = _obtener_token()
     db_proyectos = obtener_db_configurada("db_proyectos")
-
-    if not token:
-        logger.warning("No hay token de Notion configurado")
-        return None
     if not db_proyectos:
         logger.warning("No hay db_proyectos configurado")
         return None
-
-    url_consulta = "https://api.notion.com/v1/pages"
-    cabeceras = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Notion-Version": NOTION_VERSION,
-    }
 
     propiedades: dict = {
         "Nombre": {"title": [{"text": {"content": nombre}}]},
@@ -195,25 +222,25 @@ def crear_proyecto(nombre: str, area_id: str | None = None) -> dict | None:
     if area_id:
         propiedades["Área"] = {"relation": [{"id": area_id}]}
 
-    payload = {
-        "parent": {"database_id": db_proyectos},
-        "properties": propiedades,
-    }
+    return _crear_pagina(db_proyectos, propiedades)
 
-    try:
-        respuesta = requests.post(url_consulta, headers=cabeceras, json=payload, timeout=10)
-    except requests.exceptions.Timeout:
-        logger.warning("La consulta a Notion tardó demasiado")
+
+def crear_tarea(nombre: str, proyecto_id: str, asignado: str = "ChepeCarlos") -> dict | None:
+    """Crea una tarea en la base de datos de Tareas vinculada a un proyecto.
+
+    Returns:
+        dict con la respuesta de Notion (incluye 'id' y 'url'), o None si falló.
+    """
+    db_tareas = obtener_db_configurada("db_tareas")
+    if not db_tareas:
+        logger.warning("No hay db_tareas configurado")
         return None
-    except Exception as e:
-        logger.warning(f"Error al crear proyecto en Notion: {e}")
-        return None
 
-    if respuesta.status_code == 200:
-        return respuesta.json()
-
-    logger.warning(f"Notion respondió con código {respuesta.status_code}: {respuesta.text}")
-    return None
+    return _crear_pagina(db_tareas, {
+        "Nombre":   {"title": [{"text": {"content": nombre}}]},
+        "Proyecto": {"relation": [{"id": proyecto_id}]},
+        "Asignado": {"select": {"name": asignado}},
+    })
 
 
 def actualizar_propiedades(page_id: str, propiedades: dict) -> bool:

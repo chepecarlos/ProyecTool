@@ -24,6 +24,7 @@ CAMPOS = {
     "token":        "Token de integración de Notion",
     "db_proyectos": "Base de datos de Proyectos",
     "db_area":      "Base de datos de Áreas",
+    "db_tareas":    "Base de datos de Tareas",
 }
 
 
@@ -73,10 +74,14 @@ def configure(
         None, "--db-area",
         help="ID de la base de datos de Áreas en Notion.",
     ),
+    db_tareas: str = typer.Option(
+        None, "--db-tareas",
+        help="ID de la base de datos de Tareas en Notion.",
+    ),
 ) -> None:
     """⚙️   Guarda la configuración de conexión con Notion."""
 
-    if not any([token, db_proyectos, db_area]):
+    if not any([token, db_proyectos, db_area, db_tareas]):
         # Sin argumentos → mostrar estado actual
         config = _obtener_config()
         completo = _mostrar_estado(config)
@@ -98,6 +103,10 @@ def configure(
     if db_area:
         SalvarValor(str(CONFIG_FILE), "db_area", db_area, local=False)
         rprint(f"[green]✓[/] db_area guardado")
+
+    if db_tareas:
+        SalvarValor(str(CONFIG_FILE), "db_tareas", db_tareas, local=False)
+        rprint(f"[green]✓[/] db_tareas guardado")
 
     # Mostrar estado actualizado
     rprint()

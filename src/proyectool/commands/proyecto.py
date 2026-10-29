@@ -1,6 +1,8 @@
 """Comandos para gestionar Proyectos."""
 
+import os
 import re
+import shutil
 import webbrowser
 from pathlib import Path
 
@@ -14,6 +16,7 @@ from proyectool.miLibrerias.FuncionesArchivos import EscribirArchivo, ObtenerArc
 from proyectool.notion_api import (
     archivar_pagina,
     crear_proyecto,
+    crear_tarea,
     extraer_id_url,
     obtener_datos_proyecto,
     obtener_db_configurada,
@@ -65,6 +68,32 @@ def _limpiar_nombre_folder(nombre: str) -> str:
     return (prefijo + nombre).strip()
 
 
+def _areas_ancestras(folder: Path) -> list[dict]:
+    """Datos de las áreas en los 3 niveles superiores de `folder`, de la más cercana a la más lejana."""
+    areas = []
+    for directorio in list(folder.parents)[:3]:
+        data = ObtenerArchivo(str(directorio / AREA_FILE), EnConfig=False)
+        if data:
+            areas.append(data)
+    return areas
+
+
+def _nombre_con_numero(nombre: str, existentes: list[str]) -> str:
+    """'Mi video' → '3.Mi_video' si el número más alto entre `existentes` es 2.
+
+    Si el nombre ya trae número ('5.Mi video') se respeta.
+    """
+    nombre = re.sub(r"\s+", "_", nombre.strip())
+    if re.match(r"^\d+[._\-]", nombre):
+        return nombre
+    numeros = [m.group(1) for e in existentes if (m := re.match(r"^(\d+)[._\-\s]", e))]
+    if not numeros:
+        return f"1.{nombre}"
+    mayor = max(numeros, key=int)
+    # Respeta ceros a la izquierda: '09' → '10', '01' → '02'
+    return f"{str(int(mayor) + 1).zfill(len(mayor))}.{nombre}"
+
+
 @app.command("list")
 def list_proyectos() -> None:
     """📋  Muestra el proyecto del folder actual."""
@@ -114,23 +143,16 @@ def add_proyecto(
         nombre_folder = _limpiar_nombre_folder(Path.cwd().name)
 
         # Buscar área hasta 3 niveles arriba (padre, abuelo, bisabuelo)
-        ruta_area_padre = None
-        directorio = Path.cwd()
-        for _ in range(3):
-            directorio = directorio.parent
-            candidato = directorio / ".proyectool" / "area.md"
-            if candidato.exists():
-                ruta_area_padre = candidato
-                break
+        areas = _areas_ancestras(Path.cwd())
 
-        if ruta_area_padre is None:
+        if not areas:
             rprint("[red]✗[/]  No se pasó URL y no se encontró un área en los 3 niveles superiores.")
             rprint("  Opciones:")
             rprint("    • Pasa una URL:   [cyan]proyectool proyecto add <url>[/]")
             rprint("    • Configura área en un folder ancestro y luego vuelve a intentarlo.")
             raise typer.Exit(1)
 
-        data_area = ObtenerArchivo(str(ruta_area_padre), EnConfig=False)
+        data_area = areas[0]
         area_id = data_area.get("id")
         area_nombre = data_area.get("titulo") or area_id
 
@@ -201,6 +223,57 @@ def add_proyecto(
         rprint(f"[green]✓[/] Proyecto [bold]{titulo}[/] guardado en [dim]{archivo}[/]")
     else:
         rprint(f"[green]✓[/] Proyecto guardado en [dim]{archivo}[/]")
+
+
+@app.command("crear")
+def crear_proyecto_folder(
+    nombre: str = typer.Argument(..., help="Nombre del proyecto (los espacios se cambian por _, el número se pone solo)."),
+    sin_notion: bool = typer.Option(False, "--sin-notion", help="Solo crea el folder local, sin Notion ni tareas."),
+) -> None:
+    """🆕  Crea un folder de proyecto desde la plantilla del área y lo crea en Notion."""
+    existentes = [d.name for d in Path.cwd().iterdir() if d.is_dir()]
+    destino = Path.cwd() / _nombre_con_numero(nombre, existentes)
+    if destino.exists():
+        rprint(f"[red]✗[/]  Ya existe: [dim]{destino}[/]")
+        raise typer.Exit(1)
+
+    areas = _areas_ancestras(destino)
+    if not areas and not sin_notion:
+        rprint("[red]✗[/]  No se encontró un área en los 3 niveles superiores.")
+        rprint("  Configura una con [cyan]proyectool area add <url>[/] o usa [cyan]--sin-notion[/]")
+        raise typer.Exit(1)
+
+    # Plantilla y tareas se heredan del área más cercana que las tenga
+    plantilla = next((a["plantilla"] for a in areas if a.get("plantilla")), None)
+    tareas = next((a["tareas"] for a in areas if a.get("tareas")), [])
+
+    if plantilla and Path(plantilla).is_dir():
+        shutil.copytree(plantilla, destino, ignore=shutil.ignore_patterns(".proyectool"))
+    else:
+        destino.mkdir()
+        if plantilla and Path(plantilla).is_file():
+            shutil.copy2(plantilla, destino)
+        elif plantilla:
+            rprint(f"[yellow]⚠[/]  La plantilla ya no existe: [dim]{plantilla}[/] (se crea folder vacío)")
+
+    rprint(f"[green]✓[/] Folder [bold]{destino.name}[/] creado.")
+    if sin_notion:
+        return
+
+    # ponytail: reutiliza el modo creación de `add`, que encuentra el área en el folder padre
+    os.chdir(destino)
+    add_proyecto(url=None)
+
+    if not tareas:
+        return
+    proyecto_id = ObtenerArchivo(str(_ruta_proyecto()), EnConfig=False).get("id")
+    with console.status("[dim]Creando tareas en Notion...[/]"):
+        creadas = [t for t in tareas if crear_tarea(t, proyecto_id)]
+    for t in creadas:
+        rprint(f"  [green]✓[/] Tarea [bold]{t}[/]")
+    if len(creadas) < len(tareas):
+        rprint(f"[red]✗[/]  No se pudieron crear {len(tareas) - len(creadas)} tareas.")
+        rprint("  Revisa [cyan]proyectool notion config --db-tareas <id>[/]")
 
 
 @app.command("info")
