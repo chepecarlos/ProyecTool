@@ -94,6 +94,44 @@ def _nombre_con_numero(nombre: str, existentes: list[str]) -> str:
     return f"{str(int(mayor) + 1).zfill(len(mayor))}.{nombre}"
 
 
+def _pagina_proyecto(url: str) -> tuple[str, dict]:
+    """Extrae el ID de la URL, consulta Notion y valida que sea de la BD de Proyectos. Sale si falla."""
+    page_id = extraer_id_url(url)
+    if not page_id:
+        rprint("[red]✗[/]  No se pudo extraer el ID de la URL.")
+        rprint("  Asegúrate de usar una URL de Notion válida.")
+        raise typer.Exit(1)
+
+    with console.status("[dim]Consultando Notion...[/]"):
+        page_data = obtener_pagina(page_id)
+
+    if not page_data:
+        rprint("[red]✗[/]  No se pudo obtener la página desde Notion.")
+        rprint("  Verifica el token con [cyan]proyectool notion config[/]")
+        raise typer.Exit(1)
+
+    db_proyectos = obtener_db_configurada("db_proyectos")
+    if db_proyectos:
+        db_padre = obtener_db_padre(page_data)
+        if db_padre and db_padre != db_proyectos:
+            titulo_erronea = obtener_titulo(page_data) or page_id
+            rprint(f"[red]✗[/]  La página [bold]{titulo_erronea}[/] no pertenece a la base de datos de Proyectos.")
+            rprint("  Asegúrate de pasar la URL de una página del database de Proyectos.")
+            raise typer.Exit(1)
+
+    return page_id, page_data
+
+
+def _folder_con_proyecto(folder: Path, page_id: str) -> Path | None:
+    """Subfolder directo de `folder` que ya está vinculado al proyecto `page_id`."""
+    for d in folder.iterdir():
+        if d.is_dir():
+            data = ObtenerArchivo(str(d / PROYECTO_FILE), EnConfig=False)
+            if data and data.get("id") == page_id:
+                return d
+    return None
+
+
 @app.command("list")
 def list_proyectos() -> None:
     """📋  Muestra el proyecto del folder actual."""
@@ -187,30 +225,7 @@ def add_proyecto(
         return
 
     # ── Modo vinculación: con URL ─────────────────────────────────────────────
-    page_id = extraer_id_url(url)
-    if not page_id:
-        rprint("[red]✗[/]  No se pudo extraer el ID de la URL.")
-        rprint("  Asegúrate de usar una URL de Notion válida.")
-        raise typer.Exit(1)
-
-    with console.status("[dim]Consultando Notion...[/]"):
-        page_data = obtener_pagina(page_id)
-
-    if not page_data:
-        rprint("[red]✗[/]  No se pudo obtener la página desde Notion.")
-        rprint("  Verifica el token con [cyan]proyectool notion config[/]")
-        raise typer.Exit(1)
-
-    # Validar que la página pertenezca a la base de datos de proyectos
-    db_proyectos = obtener_db_configurada("db_proyectos")
-    if db_proyectos:
-        db_padre = obtener_db_padre(page_data)
-        if db_padre and db_padre != db_proyectos:
-            titulo_erronea = obtener_titulo(page_data) or page_id
-            rprint(f"[red]✗[/]  La página [bold]{titulo_erronea}[/] no pertenece a la base de datos de Proyectos.")
-            rprint("  Asegúrate de pasar la URL de una página del database de Proyectos.")
-            raise typer.Exit(1)
-
+    page_id, page_data = _pagina_proyecto(url)
     titulo = obtener_titulo(page_data)
 
     data = {"url": url, "id": page_id}
@@ -227,10 +242,19 @@ def add_proyecto(
 
 @app.command("crear")
 def crear_proyecto_folder(
-    nombre: str = typer.Argument(..., help="Nombre del proyecto (los espacios se cambian por _, el número se pone solo)."),
+    nombre: str = typer.Argument(..., help="Nombre del proyecto o URL de un proyecto ya creado en Notion."),
     sin_notion: bool = typer.Option(False, "--sin-notion", help="Solo crea el folder local, sin Notion ni tareas."),
 ) -> None:
-    """🆕  Crea un folder de proyecto desde la plantilla del área y lo crea en Notion."""
+    """🆕  Crea un folder de proyecto desde la plantilla del área y lo crea (o vincula, si es URL) en Notion."""
+    url = nombre if nombre.startswith("http") else None
+    if url:
+        page_id, page_data = _pagina_proyecto(url)
+        if previo := _folder_con_proyecto(Path.cwd(), page_id):
+            rprint(f"[yellow]⚠[/]  Ese proyecto ya existe en [bold]{previo.name}[/]")
+            raise typer.Exit(1)
+        titulo = obtener_titulo(page_data) or page_id
+        nombre = titulo.replace("/", "-")
+
     existentes = [d.name for d in Path.cwd().iterdir() if d.is_dir()]
     destino = Path.cwd() / _nombre_con_numero(nombre, existentes)
     if destino.exists():
@@ -238,7 +262,7 @@ def crear_proyecto_folder(
         raise typer.Exit(1)
 
     areas = _areas_ancestras(destino)
-    if not areas and not sin_notion:
+    if not areas and not sin_notion and not url:
         rprint("[red]✗[/]  No se encontró un área en los 3 niveles superiores.")
         rprint("  Configura una con [cyan]proyectool area add <url>[/] o usa [cyan]--sin-notion[/]")
         raise typer.Exit(1)
@@ -257,6 +281,11 @@ def crear_proyecto_folder(
             rprint(f"[yellow]⚠[/]  La plantilla ya no existe: [dim]{plantilla}[/] (se crea folder vacío)")
 
     rprint(f"[green]✓[/] Folder [bold]{destino.name}[/] creado.")
+    if url:
+        # ponytail: el proyecto ya existe en Notion, no se crean tareas del área
+        EscribirArchivo(str(destino / PROYECTO_FILE), {"url": url, "id": page_id, "titulo": titulo})
+        rprint(f"[green]✓[/] Vinculado al proyecto [bold]{titulo}[/]")
+        return
     if sin_notion:
         return
 

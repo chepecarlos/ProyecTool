@@ -1,4 +1,8 @@
-from proyectool.commands.proyecto import _nombre_con_numero
+import tempfile
+from pathlib import Path
+
+from proyectool.commands.proyecto import PROYECTO_FILE, _folder_con_proyecto, _nombre_con_numero
+from proyectool.miLibrerias.FuncionesArchivos import EscribirArchivo
 
 
 def test_nombre_con_numero():
@@ -9,6 +13,16 @@ def test_nombre_con_numero():
     assert _nombre_con_numero("5.Ya numerado", ["9.A"]) == "5.Ya_numerado"
 
 
+def test_folder_con_proyecto():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        (base / "2.Otro").mkdir()
+        EscribirArchivo(str(base / "1.Video" / PROYECTO_FILE), {"id": "abc-123"})
+        assert _folder_con_proyecto(base, "abc-123").name == "1.Video"
+        assert _folder_con_proyecto(base, "zzz") is None
+
+
 if __name__ == "__main__":
     test_nombre_con_numero()
+    test_folder_con_proyecto()
     print("ok")
