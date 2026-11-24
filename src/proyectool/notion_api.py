@@ -351,3 +351,60 @@ def obtener_titulo(page_data: dict) -> str | None:
     except Exception as e:
         logger.warning(f"Error extrayendo título: {e}")
     return None
+
+
+def consultar_db(db_id: str, filtro: dict | None = None) -> list[dict] | None:
+    """Devuelve todas las páginas de una base de datos (sigue la paginación).
+
+    Returns:
+        lista de páginas, o None si falló.
+    """
+    token = _obtener_token()
+    if not token:
+        logger.warning("No hay token de Notion configurado")
+        return None
+
+    cabeceras = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+    payload: dict = {"filter": filtro} if filtro else {}
+    paginas: list[dict] = []
+
+    while True:
+        try:
+            respuesta = requests.post(
+                f"https://api.notion.com/v1/databases/{db_id}/query",
+                headers=cabeceras, json=payload, timeout=20,
+            )
+        except Exception as e:
+            logger.warning(f"Error al consultar la base de datos: {e}")
+            return None
+        if respuesta.status_code != 200:
+            logger.warning(f"Notion respondió con código {respuesta.status_code}: {respuesta.text}")
+            return None
+        data = respuesta.json()
+        paginas += data.get("results", [])
+        if not data.get("has_more"):
+            return paginas
+        payload["start_cursor"] = data["next_cursor"]
+
+
+def valor_propiedad(prop: dict | None) -> str:
+    """Texto plano de cualquier propiedad de Notion ('' si está vacía)."""
+    if not prop:
+        return ""
+    tipo = prop.get("type")
+    valor = prop.get(tipo)
+    if tipo == "formula" and valor:
+        valor = valor.get(valor.get("type"))
+    if tipo == "multi_select":
+        return ", ".join(v.get("name", "") for v in valor or [])
+    if isinstance(valor, list):  # title, rich_text
+        return "".join(v.get("plain_text", "") for v in valor)
+    if isinstance(valor, dict):  # select, status, date
+        return valor.get("name") or valor.get("start") or ""
+    if isinstance(valor, bool):
+        return str(valor).lower()
+    return "" if valor is None else str(valor)

@@ -7,7 +7,7 @@ from rich import print as rprint
 from rich.panel import Panel
 
 from proyectool import __version__
-from proyectool.commands import area, local, notion, plantilla, proyecto, sync, tarea
+from proyectool.commands import area, local, notion, pedido, plantilla, proyecto, sync, tarea
 
 HELP_SETTINGS = {"help_option_names": ["-h", "-help", "--help"]}
 
@@ -27,6 +27,7 @@ app.add_typer(notion.app,   name="notion",   help="📓  Configuración de Notio
 app.add_typer(sync.app,     name="sync",     help="🔄  Sincroniza local ↔ Notion.")
 app.add_typer(local.app,    name="local",    help="📁  Gestiona proyectos locales.")
 app.add_typer(plantilla.app, name="plantilla", help="📐  Gestiona plantillas de proyectos.")
+app.add_typer(pedido.app,  name="pedido",   help="📦  Seguimiento de pedidos con AeroFlash.")
 
 
 @app.command("open")
